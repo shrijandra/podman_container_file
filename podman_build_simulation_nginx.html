@@ -1,2 +1,479 @@
---bg: #0b1218;
-html
+<style>
+/* Layout: Containerfile (left) | build stage + image layers (right) | terminal across the bottom.
+   Deliberately single-theme (dark terminal world); every color is a token below. */
+:root {
+  --bg: #0b1218;
+  --panel: #111b23;
+  --panel-2: #0e171e;
+  --line: #22323e;
+  --fg: #d6e2ea;
+  --dim: #7f94a3;
+  --amber: #f3b04a;
+  --teal: #46c6b8;
+  --violet: #a99cf0;
+  --red: #ef6a5e;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  padding-block: 20px 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1200px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; }
+h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+.sub { margin: 4px 0 0; color: var(--dim); max-width: 62ch; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, select {
+  font: 500 13px var(--font-ui);
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+button:hover, select:hover { border-color: var(--dim); }
+button:focus-visible, select:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+button.primary { background: var(--amber); color: #1a1205; border-color: var(--amber); font-weight: 600; min-width: 92px; }
+.main { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; }
+.col { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.ph { display: flex; justify-content: space-between; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--line); font: 500 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+.pb { padding: 12px 14px; }
+
+/* progress */
+.track { display: flex; gap: 4px; }
+.track i { flex: 1; height: 4px; border-radius: 2px; background: var(--line); transition: background 0.3s; }
+.track i.on { background: var(--amber); }
+.track i.done { background: var(--teal); }
+
+/* containerfile */
+.code { overflow-x: auto; padding: 8px 0; font: 400 12.5px/1.9 var(--font-mono); }
+.cl { display: flex; align-items: baseline; white-space: pre; padding: 0 14px 0 0; border-left: 3px solid transparent; transition: background 0.25s, border-color 0.25s; min-width: max-content; width: 100%; }
+.cl .no { width: 34px; flex: none; text-align: right; padding-right: 12px; color: var(--dim); opacity: 0.6; }
+.cl .kw { color: var(--violet); font-weight: 700; display: inline-block; min-width: 12ch; }
+.cl .cm { color: var(--dim); }
+.cl .tick { margin-left: auto; padding-left: 16px; color: var(--teal); opacity: 0; transition: opacity 0.3s; }
+.cl.active { background: rgba(243, 176, 74, 0.12); border-left-color: var(--amber); }
+.cl.done .tick { opacity: 1; }
+
+/* stage */
+.phases { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 14px; }
+.phases span { font: 500 11px/1.3 var(--font-ui); text-align: center; padding: 6px 4px; border: 1px solid var(--line); border-radius: 5px; color: var(--dim); transition: all 0.25s; }
+.phases span.on { color: #1a1205; background: var(--amber); border-color: var(--amber); font-weight: 600; }
+.phases span.past { color: var(--teal); border-color: rgba(70, 198, 184, 0.4); }
+.flow { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1.35fr) 28px minmax(0, 1fr); gap: 6px; align-items: stretch; }
+.node { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--panel-2); min-height: 118px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.node small { font: 500 10px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+.node b { font: 500 12px var(--font-mono); overflow-wrap: anywhere; color: var(--fg); }
+.node.img { border-style: solid; }
+.node.img.has { border-color: var(--teal); }
+.node.img.has b { color: var(--teal); }
+.node.img.pop { animation: pop 0.5s ease-out; }
+.ctr { opacity: 0.3; transform: scale(0.95); border-style: dashed; transition: opacity 0.35s, transform 0.35s, border-color 0.35s; }
+.ctr.on { opacity: 1; transform: scale(1); border-color: var(--amber); border-style: solid; box-shadow: 0 0 0 3px rgba(243, 176, 74, 0.1); }
+.ctr.rm { opacity: 0.15; transform: scale(0.9); border-color: var(--red); }
+.ctr code { font: 400 11.5px/1.45 var(--font-mono); color: var(--fg); overflow-wrap: anywhere; min-height: 34px; }
+.bar { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: auto; }
+.bar i { display: block; height: 100%; width: 0; background: var(--amber); }
+.state { font: 500 11px var(--font-ui); color: var(--dim); }
+.ctr.on .state { color: var(--amber); }
+.ctr.rm .state { color: var(--red); }
+.arrow { display: grid; place-items: center; color: var(--line); font-size: 20px; transition: color 0.2s; }
+.arrow::before { content: "\2192"; }
+.arrow.go { color: var(--amber); animation: nudge 0.7s ease-in-out infinite; }
+.caption { margin: 14px 0 0; padding: 10px 12px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); min-height: 66px; }
+.caption b { font: 700 12px var(--font-mono); color: var(--violet); margin-right: 6px; }
+
+/* layers + config */
+.two { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
+.stack { display: flex; flex-direction: column-reverse; gap: 5px; min-height: 120px; }
+.stack .empty { order: 99; color: var(--dim); font-size: 12px; padding: 8px 0; }
+.layer { display: flex; align-items: center; gap: 10px; border-radius: 6px; padding: 0 10px; min-width: 0; animation: drop 0.5s ease-out; }
+.layer.fs { background: rgba(70, 198, 184, 0.14); border: 1px solid var(--teal); min-height: 44px; }
+.layer.meta { background: transparent; border: 1px dashed var(--violet); min-height: 28px; }
+.layer .id { font: 500 10px var(--font-mono); color: var(--dim); flex: none; }
+.layer .t { font: 500 12px var(--font-mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer.fs .t { color: var(--teal); }
+.layer.meta .t { color: var(--violet); }
+.layer .sz { font: 400 11px var(--font-mono); color: var(--dim); flex: none; }
+.total { display: flex; justify-content: space-between; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font: 500 12px var(--font-mono); color: var(--dim); }
+.total b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.cfg { font: 400 12px/1.5 var(--font-mono); display: grid; gap: 8px; }
+.cfg div { display: grid; gap: 1px; }
+.cfg dt { color: var(--dim); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; }
+.cfg dd { margin: 0; color: var(--dim); overflow-wrap: anywhere; transition: color 0.3s; }
+.cfg dd.set { color: var(--violet); }
+.cfg dd.flash { animation: flash 0.9s ease-out; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 11.5px; color: var(--dim); }
+.legend i { display: inline-block; width: 12px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.legend .a { background: rgba(70, 198, 184, 0.3); border: 1px solid var(--teal); }
+.legend .b { border: 1px dashed var(--violet); }
+
+/* terminal */
+.term { height: 270px; overflow-y: auto; padding: 12px 14px; font: 400 12.5px/1.6 var(--font-mono); background: #080e13; border-radius: 0 0 8px 8px; }
+.term div { white-space: pre-wrap; overflow-wrap: anywhere; }
+.term .prompt { color: var(--teal); }
+.term .step { color: var(--amber); font-weight: 500; margin-top: 4px; }
+.term .arrowline { color: var(--dim); }
+.term .out { color: var(--dim); }
+.term .ok { color: var(--teal); }
+.cursor { display: inline-block; width: 7px; height: 14px; background: var(--fg); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+
+@keyframes pop { 0% { transform: scale(0.94); } 60% { transform: scale(1.03); } 100% { transform: scale(1); } }
+@keyframes drop { from { opacity: 0; transform: translateY(-26px); } to { opacity: 1; transform: none; } }
+@keyframes nudge { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(4px); } }
+@keyframes flash { from { background: rgba(169, 156, 240, 0.35); } to { background: transparent; } }
+@keyframes blink { 50% { opacity: 0; } }
+
+@media (max-width: 860px) {
+  .main { grid-template-columns: minmax(0, 1fr); }
+  .two { grid-template-columns: minmax(0, 1fr); }
+  .flow { grid-template-columns: minmax(0, 1fr); }
+  .arrow { height: 22px; }
+  .arrow::before { content: "\2193"; }
+  .arrow.go { animation-name: nudgeY; }
+  .node { min-height: 0; }
+  .phases span { font-size: 10.5px; }
+  h1 { font-size: 22px; }
+}
+@keyframes nudgeY { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(3px); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Podman Build Walkthrough</h1>
+      <p class="sub">Every Containerfile instruction runs in its own container, started from the image the previous instruction produced. Watch <code style="font-family:var(--font-mono)">podman build</code> turn an small nginx web server Containerfile into an image, one layer at a time.</p>
+    </div>
+    <div class="controls">
+      <button id="play" class="primary" type="button">Pause</button>
+      <button id="restart" type="button">Restart</button>
+      <label for="speed" style="color:var(--dim);font-size:12px">Speed</label>
+      <select id="speed">
+        <option value="0.6">0.6x</option>
+        <option value="1" selected>1x</option>
+        <option value="1.8">1.8x</option>
+        <option value="3">3x</option>
+      </select>
+    </div>
+  </header>
+
+  <div class="track" id="track" aria-label="Build progress"></div>
+
+  <div class="main">
+    <div class="col">
+      <section class="panel">
+        <div class="ph"><span>Containerfile</span><span>11 instructions</span></div>
+        <div class="code" id="code"></div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel">
+        <div class="ph"><span>Build stage</span><span id="stepLabel">idle</span></div>
+        <div class="pb">
+          <div class="phases" id="phases">
+            <span>1 Create container</span><span>2 Run instruction</span><span>3 Commit image</span><span>4 Remove container</span>
+          </div>
+          <div class="flow">
+            <div class="node img" id="prev"><small>Previous image</small><b id="prevId">none yet</b></div>
+            <div class="arrow" id="a1"></div>
+            <div class="node ctr" id="ctr">
+              <small id="ctrName">Intermediate container</small>
+              <code id="ctrCmd">waiting</code>
+              <div class="bar"><i id="bar"></i></div>
+              <span class="state" id="ctrState">idle</span>
+            </div>
+            <div class="arrow" id="a2"></div>
+            <div class="node img" id="next"><small>New image</small><b id="nextId">none yet</b></div>
+          </div>
+          <p class="caption" id="caption"><b>Ready</b>Podman reads the Containerfile top to bottom. Comment lines starting with # are skipped.</p>
+        </div>
+      </section>
+
+      <div class="two">
+        <section class="panel">
+          <div class="ph"><span>Image layers</span><span id="layerCount">0</span></div>
+          <div class="pb">
+            <div class="stack" id="stack"><div class="empty" id="empty">No layers yet.</div></div>
+            <div class="total"><span>Size (illustrative)</span><b id="size">0 MB</b></div>
+            <div class="legend"><span><i class="a"></i>Filesystem layer</span><span><i class="b"></i>Config only, 0 B</span></div>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="ph"><span>Image config</span><span>metadata</span></div>
+          <div class="pb">
+            <dl class="cfg" style="margin:0">
+              <div><dt>Labels</dt><dd id="c-label">unset</dd></div>
+              <div><dt>ExposedPorts</dt><dd id="c-port">unset</dd></div>
+              <div><dt>Env</dt><dd id="c-env">unset</dd></div>
+              <div><dt>User</dt><dd id="c-user">root (inherited)</dd></div>
+              <div><dt>Entrypoint</dt><dd id="c-ep">unset</dd></div>
+              <div><dt>Cmd</dt><dd id="c-cmd">unset</dd></div>
+            </dl>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <section class="panel">
+    <div class="ph"><span>Terminal</span><span>podman build</span></div>
+    <div class="term" id="term" role="log" aria-live="off"></div>
+  </section>
+  <p class="sub" style="font-size:12px">Original example Containerfile written for this walkthrough. Layer sizes and image IDs are illustrative. Podman, Red Hat, UBI and nginx are trademarks of their respective owners; this page is independent and not endorsed by them.</p>
+</div>
+
+<script>
+(function () {
+  var LINES = [
+    { c: "# Small static website served by nginx" },
+    { k: "FROM", a: "registry.redhat.io/ubi10/ubi:10.0" },
+    { k: "LABEL", a: 'maintainer="platform-team@example.com"' },
+    { k: "RUN", a: "dnf install -y nginx" },
+    { k: "EXPOSE", a: "8080" },
+    { k: "ENV", a: 'SITE_NAME "Demo Site"' },
+    { k: "ADD", a: "https://example.com/assets/logo.png /usr/share/nginx/html/" },
+    { k: "COPY", a: "./site/   /usr/share/nginx/html/" },
+    { k: "COPY", a: "./nginx.conf   /etc/nginx/nginx.conf" },
+    { k: "USER", a: "nginx" },
+    { k: "ENTRYPOINT", a: '["nginx"]' },
+    { k: "CMD", a: '["-g", "daemon off;"]' }
+  ];
+
+  var IDS = ["3f9a1c07b2d4", "7c1e9a2b4d10", "a83f5e6c91b7", "5d02c8e4f1a3", "e19b7a30c6d8", "0b4c2f9d7e15", "c7d8a1e3b905", "62f0e5b8a4c1", "b5a91d27f3e0", "9e0d4c6a8b72", "d41c7e09a5f3", "18ae6b50d3c7"];
+
+  var STEPS = [
+    { line: 1, k: "FROM", type: "fs", name: "ubi10/ubi:10.0 (base)", size: 214, run: "pull base image layers", dur: 1500,
+      explain: "picks the base image this build starts from. Podman pulls ubi10/ubi:10.0 into local storage, and its filesystem becomes the first layer.",
+      out: ["Trying to pull registry.redhat.io/ubi10/ubi:10.0...", "Getting image source signatures", "Copying blob sha256:3f9a1c07b2d4 done", "Copying config sha256:a1c4e7d90b36 done", "Writing manifest to image destination"] },
+    { line: 2, k: "LABEL", type: "meta", name: "label maintainer", run: "buildah config --label maintainer=...", dur: 700,
+      explain: "attaches a key-value note to the image, such as who owns it. It edits the image config only; no files change.", out: [],
+      cfg: ["c-label", 'maintainer="platform-team@example.com"'] },
+    { line: 3, k: "RUN", type: "fs", name: "dnf install -y nginx", size: 58, run: "/bin/sh -c dnf install -y nginx", dur: 2000,
+      explain: "runs a shell command inside the temporary container. Everything it writes to the filesystem is saved as a new layer.",
+      out: ["Updating Subscription Management repositories.", "Dependencies resolved.", "Installing: nginx nginx-core nginx-filesystem", "Running transaction", "Complete!"] },
+    { line: 4, k: "EXPOSE", type: "meta", name: "expose 8080", run: "buildah config --port 8080", dur: 700,
+      explain: "documents that the app inside listens on port 8080. It is a hint for people and tools; it does not open the port.", out: [],
+      cfg: ["c-port", "8080/tcp"] },
+    { line: 5, k: "ENV", type: "meta", name: "env SITE_NAME", run: "buildah config --env SITE_NAME=Demo Site", dur: 700,
+      explain: "stores an environment variable in the image config. Every container started from this image sees it.", out: [],
+      cfg: ["c-env", "SITE_NAME=Demo Site"] },
+    { line: 6, k: "ADD", type: "fs", name: "logo.png", size: 0.048, run: "fetch https://example.com/assets/logo.png -> html/", dur: 1300,
+      explain: "brings a file into the image. ADD can download from a URL, and it also unpacks local tar archives.",
+      out: ["Downloading https://example.com/assets/logo.png", "Writing /usr/share/nginx/html/logo.png"] },
+    { line: 7, k: "COPY", type: "fs", name: "./site/ -> html/", size: 0.212, run: "copy ./site/ -> /usr/share/nginx/html/", dur: 1000,
+      explain: "copies files from your build folder (the build context) into the image. Use it for your own files.",
+      out: ["Copying 9 files from build context"] },
+    { line: 8, k: "COPY", type: "fs", name: "./nginx.conf -> /etc/nginx/", size: 0.002, run: "copy ./nginx.conf -> /etc/nginx/nginx.conf", dur: 900,
+      explain: "copies your own nginx config over the default one. It listens on port 8080 and keeps its PID and temp files in /tmp, so a non-root user can run it.",
+      out: ["Copying nginx.conf from build context"] },
+    { line: 9, k: "USER", type: "meta", name: "user nginx", run: "buildah config --user nginx", dur: 700,
+      explain: "sets which account runs the container process, so the web server does not run as root.", out: [],
+      cfg: ["c-user", "nginx"] },
+    { line: 10, k: "ENTRYPOINT", type: "meta", name: "entrypoint nginx", run: 'buildah config --entrypoint ["nginx"]', dur: 700,
+      explain: "sets the program that always runs when the container starts.", out: [],
+      cfg: ["c-ep", '["nginx"]'] },
+    { line: 11, k: "CMD", type: "meta", name: "cmd -g daemon off;", run: 'buildah config --cmd ["-g","daemon off;"]', dur: 700,
+      explain: "supplies default arguments to ENTRYPOINT. Starting the container runs: nginx -g \"daemon off;\", which keeps nginx in the foreground.", out: [],
+      cfg: ["c-cmd", '["-g", "daemon off;"]'] }
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var term = $("term"), bar = $("bar");
+  var paused = false, speed = 1, token = 0, totalMB = 0, layers = 0;
+
+  // build containerfile
+  var codeEl = $("code");
+  LINES.forEach(function (l, i) {
+    var d = document.createElement("div");
+    d.className = "cl"; d.id = "cl" + i;
+    var text = l.c ? '<span class="cm"></span>' : '<span class="kw"></span><span class="ar"></span>';
+    d.innerHTML = '<span class="no">' + (i + 1) + "</span>" + text + '<span class="tick">&#10003;</span>';
+    if (l.c) d.querySelector(".cm").textContent = l.c;
+    else { d.querySelector(".kw").textContent = l.k; d.querySelector(".ar").textContent = l.a; }
+    codeEl.appendChild(d);
+  });
+  var trk = $("track");
+  for (var t = 0; t < 12; t++) trk.appendChild(document.createElement("i"));
+  var ticks = trk.children;
+
+  function wait(ms, tk, onTick) {
+    return new Promise(function (resolve, reject) {
+      var elapsed = 0;
+      (function loop() {
+        if (tk !== token) return reject("abort");
+        if (elapsed >= ms) return resolve();
+        setTimeout(function () {
+          if (!paused) { elapsed += 40 * speed; if (onTick) onTick(Math.min(1, elapsed / ms)); }
+          loop();
+        }, 40);
+      })();
+    });
+  }
+
+  function addLine(text, cls) {
+    var d = document.createElement("div");
+    d.className = cls || ""; d.textContent = text;
+    var cur = term.querySelector(".cursor");
+    if (cur) cur.parentNode.removeChild(cur);
+    term.appendChild(d);
+    term.scrollTop = term.scrollHeight;
+    return d;
+  }
+  async function typeCmd(prefix, text, cls, tk) {
+    var d = addLine("", cls);
+    var p = document.createElement("span"); p.className = "prompt"; p.textContent = prefix;
+    var s = document.createElement("span");
+    d.appendChild(p); d.appendChild(s);
+    for (var i = 0; i < text.length; i++) {
+      s.textContent += text[i];
+      term.scrollTop = term.scrollHeight;
+      await wait(16, tk);
+    }
+  }
+  function setPhase(n) {
+    var sp = $("phases").children;
+    for (var i = 0; i < sp.length; i++) sp[i].className = i < n ? "past" : i === n ? "on" : "";
+  }
+  function fmt(mb) { return mb >= 10 ? Math.round(mb) + " MB" : mb >= 1 ? mb.toFixed(1) + " MB" : Math.round(mb * 1000) + " kB"; }
+  function addLayer(s, idx) {
+    var d = document.createElement("div");
+    d.className = "layer " + s.type;
+    var id = document.createElement("span"); id.className = "id"; id.textContent = IDS[idx].slice(0, 7);
+    var t = document.createElement("span"); t.className = "t"; t.textContent = s.k + "  " + s.name;
+    var z = document.createElement("span"); z.className = "sz"; z.textContent = s.type === "fs" ? "+" + fmt(s.size) : "0 B";
+    d.appendChild(id); d.appendChild(t); d.appendChild(z);
+    $("stack").appendChild(d);
+    $("empty").style.display = "none";
+    layers++;
+    $("layerCount").textContent = layers;
+    if (s.type === "fs") totalMB += s.size;
+    $("size").textContent = "~" + fmt(totalMB);
+  }
+  function reset() {
+    term.innerHTML = "";
+    var st = $("stack");
+    Array.prototype.slice.call(st.querySelectorAll(".layer")).forEach(function (n) { st.removeChild(n); });
+    $("empty").style.display = ""; layers = 0; totalMB = 0;
+    $("layerCount").textContent = "0"; $("size").textContent = "0 MB";
+    var defaults = { "c-label": "unset", "c-port": "unset", "c-env": "unset", "c-user": "root (inherited)", "c-ep": "unset", "c-cmd": "unset" };
+    Object.keys(defaults).forEach(function (k) { var e = $(k); e.textContent = defaults[k]; e.className = ""; });
+    for (var i = 0; i < LINES.length; i++) $("cl" + i).className = "cl";
+    for (var j = 0; j < ticks.length; j++) ticks[j].className = "";
+    $("prevId").textContent = "none yet"; $("prev").className = "node img";
+    $("nextId").textContent = "none yet"; $("next").className = "node img";
+    $("ctr").className = "node ctr"; $("ctrCmd").textContent = "waiting"; $("ctrState").textContent = "idle";
+    $("ctrName").textContent = "Intermediate container";
+    $("a1").className = "arrow"; $("a2").className = "arrow";
+    bar.style.width = "0%"; setPhase(-1); $("stepLabel").textContent = "idle";
+  }
+  function caption(label, body) { $("caption").innerHTML = "<b></b><span></span>"; $("caption").firstChild.textContent = label; $("caption").lastChild.textContent = body; }
+
+  async function runStep(i, tk) {
+    var s = STEPS[i], n = i + 1, id = IDS[i + 1] || IDS[IDS.length - 1];
+    var lineEl = $("cl" + s.line);
+    lineEl.className = "cl active";
+    ticks[i].className = "on";
+    $("stepLabel").textContent = "step " + n + " of 11";
+    caption(s.k, s.explain);
+    var arg = LINES[s.line].a;
+    await typeCmd("", "STEP " + n + "/11: " + s.k + " " + arg, "step", tk);
+    var step = term.lastChild; step.firstChild.textContent = "";
+
+    // 1 create container from previous image
+    setPhase(0);
+    var first = i === 0;
+    $("prevId").textContent = first ? "registry.redhat.io" : IDS[i].slice(0, 12);
+    $("prev").className = "node img has";
+    $("nextId").textContent = "pending"; $("next").className = "node img";
+    $("ctrName").textContent = first ? "No container yet" : "working-container-" + n;
+    $("ctrCmd").textContent = first ? "base image is pulled, not built" : "podman create from " + IDS[i].slice(0, 7);
+    $("ctrState").textContent = first ? "pulling" : "creating";
+    bar.style.width = "0%";
+    $("a1").className = "arrow go"; $("ctr").className = "node ctr on";
+    await wait(800, tk);
+
+    // 2 run instruction
+    setPhase(1); $("a1").className = "arrow";
+    $("ctrCmd").textContent = s.run; $("ctrState").textContent = first ? "pulling layers" : "running";
+    var outs = s.out.length ? s.out : [null], seg = s.dur / outs.length, base = 0;
+    for (var o = 0; o < outs.length; o++) {
+      (function (b) { return b; })(base);
+      var b0 = o / outs.length;
+      await wait(seg, tk, function (f) { bar.style.width = ((b0 + f / outs.length) * 100) + "%"; });
+      if (outs[o]) addLine(outs[o], "out");
+    }
+    bar.style.width = "100%";
+
+    // 3 commit
+    setPhase(2); $("a2").className = "arrow go"; $("ctrState").textContent = "committing";
+    $("nextId").textContent = id; $("next").className = "node img has pop";
+    addLayer(s, i + 1);
+    if (s.cfg) { var e = $(s.cfg[0]); e.textContent = s.cfg[1]; e.className = "set flash"; }
+    if (!first) addLine("--> " + id, "arrowline");
+    lineEl.className = "cl done";
+    await wait(900, tk);
+
+    // 4 remove container
+    setPhase(3); $("a2").className = "arrow";
+    $("ctr").className = "node ctr rm"; $("ctrState").textContent = first ? "done" : "removed";
+    if (!first) $("ctrCmd").textContent = "removing intermediate container";
+    ticks[i].className = "done";
+    await wait(650, tk);
+    $("ctr").className = "node ctr";
+  }
+
+  async function run() {
+    var tk = ++token;
+    reset();
+    try {
+      await typeCmd("$ ", "podman build -t my-site .", "", tk);
+      await wait(500, tk);
+      for (var i = 0; i < STEPS.length; i++) await runStep(i, tk);
+      // commit
+      ticks[11].className = "on"; setPhase(-1);
+      var fin = "f27a6d3c0e94";
+      $("ctr").className = "node ctr"; $("prevId").textContent = IDS[11].slice(0, 12);
+      caption("COMMIT", "After the last instruction, Podman tags the final image. The intermediate containers are gone; only the layers and config remain.");
+      addLine("COMMIT my-site", "step");
+      await wait(700, tk);
+      addLine("--> " + fin, "arrowline");
+      $("nextId").textContent = "localhost/my-site:latest"; $("next").className = "node img has pop";
+      addLine("Successfully tagged localhost/my-site:latest", "ok");
+      addLine(fin, "ok");
+      ticks[11].className = "done";
+      $("stepLabel").textContent = "build complete";
+      caption("Done", "5 filesystem layers (FROM, RUN, ADD, COPY, COPY) and 6 config-only entries (LABEL, EXPOSE, ENV, USER, ENTRYPOINT, CMD). Each step started from the previous step's image.");
+      var cur = document.createElement("span"); cur.className = "cursor";
+      var last = addLine("", ""); last.appendChild(document.createTextNode("$ ")); last.firstChild.parentNode.style.color = "var(--teal)"; last.appendChild(cur);
+      paused = false; $("play").textContent = "Replay"; finished = true;
+    } catch (e) { if (e !== "abort") throw e; }
+  }
+
+  var finished = false;
+  $("play").addEventListener("click", function () {
+    if (finished) { finished = false; paused = false; $("play").textContent = "Pause"; run(); return; }
+    paused = !paused; $("play").textContent = paused ? "Resume" : "Pause";
+  });
+  $("restart").addEventListener("click", function () { finished = false; paused = false; $("play").textContent = "Pause"; run(); });
+  $("speed").addEventListener("change", function (e) { speed = parseFloat(e.target.value); });
+
+  setTimeout(run, 500);
+})();
+</script>
+
+</body></html>
