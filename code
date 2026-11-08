@@ -1,0 +1,17 @@
+# 1. Confirm the image exists
+podman images my-site
+
+# 2. Start a container in the background, mapping host port 8080 to container port 8080
+podman run -d --name my-site-test -p 8080:8080 localhost/my-site:latest
+
+# 3. Check that it is running
+podman ps
+
+# 4. Test it
+curl -I http://localhost:8080
+
+# 5. Read the logs
+podman logs my-site-test
+
+# 6. Clean up
+podman stop my-site-test && podman rm my-site-test
